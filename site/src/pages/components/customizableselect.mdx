@@ -161,7 +161,7 @@ This example replaces the button which opens the listbox with an author provided
 
 ### Rendering the `<option>` differently in the button
 
-This example uses the customizable `<select>` element with custom CSS to target it which renders the option differently in the listbox vs in the button.
+This example uses the customizable `<select>` element with custom CSS to target it which renders the option differently in the listbox vs in the button. The emojis have aria-hidden on them to prevent the name of the emoji being announced twice in the popup.
 
 <div className="code-image-container">
 <div>
@@ -171,10 +171,10 @@ This example uses the customizable `<select>` element with custom CSS to target 
     <selectedoption></selectedoption>
   </button>
   <option>
-    ❤️ <span class=description>heart</span>
+    <span aria-hidden=true>❤️</span> <span class=description>heart</span>
   </option>
   <option>
-    🙂 <span class=description>smile</span>
+    <span aria-hidden=true>🙂</span> <span class=description>smile</span>
   </option>
 </select>
 <style>
