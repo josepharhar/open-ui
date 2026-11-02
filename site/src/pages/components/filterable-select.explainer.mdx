@@ -21,9 +21,9 @@ import Image from '../../components/image.astro'
 
 **Filterable Select** is a proposal to enable user text-input filtering for HTML `<select>` elements. While the native `<select>` element enforces choosing from a predefined set of options—and has recently been made fully stylable via [Customizable Select](/components/customizable-select.explainer) (`appearance:base-select`)—it currently lacks any native mechanism for users to filter options by typing into an input field.
 
-Three architectural syntaxes (Option A, Option B, and Option C below) have been explored and discussed. Options A and B have been prototyped and implemented in Chromium behind the **Experimental Web Platform Features** flag: `chrome://flags/#enable-experimental-web-platform-features`
+This proposal introduces a `filterable` attribute on `<select>` that provides a built-in filtering text field in the `<select>`'s shadow root which can optionally be replaced by slotting in an author-provided child `<input>` element, paired with native CSS and DOM primitives (`beforefilter` event, `:filtered` pseudo-class, and `:active-option` selection states). This enables accessible, high-performance option filtering without requiring heavy JavaScript widget replacements.
 
-This proposal introduces a way to declaratively add a filtering text field to a select element, paired with native CSS and DOM primitives (`beforefilter` event, `:filtered` pseudo-class, and `:active-option` selection states). This enables accessible, high-performance option filtering without requiring heavy JavaScript widget replacements.
+Earlier architectural explorations (Options A, B, and C below) informed this design.
 
 ## User-Facing Problem
 
@@ -60,7 +60,69 @@ The GitHub labels picker popup is a representative real-world target use case wh
 
 ## Proposed Approach
 
-We propose allowing an `<input type=text>` element or a dedicated HTML attribute to act as a filtering trigger for a `<select>` element. Three architectural syntaxes have been explored:
+We propose adding a `filterable` attribute to the `<select>` element (a combination of the previously explored Option B and Option C below). Setting `filterable` on `<select>` adds a default filtering `<input>` element inside a slot in the `<select>`'s User Agent shadow root, which can optionally be replaced by slotting in a child `<input>` element:
+
+```html
+<!-- Using the default shadow root input provided by the filterable attribute -->
+<select filterable>
+  <option>one</option>
+  <option>two</option>
+  <option>three</option>
+</select>
+
+<!-- Replacing the default input by slotting in a child <input> element -->
+<select filterable>
+  <input placeholder="Filter options...">
+  <option>one</option>
+  <option>two</option>
+  <option>three</option>
+</select>
+```
+
+How this works:
+- **Default shadow root `<input>` with slot fallback**: When the `filterable` attribute is present on `<select>`, the browser renders a slot in the `<select>`'s shadow tree containing a fallback `<input>` element (similar to how Customizable Select handles its `<button>` slot). The fallback `<input>` can be styled via an element-backed pseudo-element. It might be feasible to listen to events and set a placeholder exposed without requiring a child `<input>` by exposing more things on the IDL of the select element ([Issue #1491](https://github.com/openui/open-ui/issues/1491)).
+- **Slotting a custom child `<input>`**: If an author needs direct DOM access to the `<input>` element (for attributes, event listeners, etc), they can place an `<input>` inside `<select filterable>`, which slots in and replaces the default shadow root `<input>`.
+- **Web-compatible HTML parser branching & progressive enhancement**: Historically, `<input>` inside `<select>` implicitly closes the `<select>` tag in the HTML parser. In older browsers without parser changes, putting `<input>` before `<option>`s dumps all of the `<option>`s outside of the `<select>` element, leaving an unusable control:
+  ```html
+  <!-- Author markup -->
+  <select>
+    <input>
+    <option>one</option>
+    <option>two</option>
+  </select>
+
+  <!-- Parsed DOM in older browsers -->
+  <select></select>
+  <input>
+  <option>one</option>
+  <option>two</option>
+  ```
+  To improve progressive enhancement in older browsers, authors could instead place `<input>` at the end of `<select>` and rely on slotting to move it to the top of the picker:
+  ```html
+  <!-- Author markup -->
+  <select>
+    <option>one</option>
+    <option>two</option>
+    <input>
+  </select>
+
+  <!-- Parsed DOM in older browsers -->
+  <select>
+    <option>one</option>
+    <option>two</option>
+  </select>
+  <input>
+  ```
+  In older browsers, all `<option>`s remain inside `<select>` and only `<input>` is pushed outside, where authors can detect it and hide it with `display: none` without needing to reparent options. However, without an attribute opt-in on `<select>`, changing the parser to only allow `<input>` before `<option>`s would prevent this `<input>`-last pattern from working, while changing the parser to allow `<input>` anywhere inside `<select>` would break [too many existing websites](https://chromestatus.com/metrics/feature/timeline/popularity/5546) that omit `</select>` and rely on `<input>` closing `<select>`.
+
+  By branching the HTML parser on the `filterable` attribute on `<select>`, we avoid breaking existing websites and give authors flexibility in how they handle progressive enhancement:
+  1. Omit the child `<input>` tag in HTML and just use `<select filterable>` (older browsers simply ignore `filterable` and render a standard `<select>`).
+  2. Place the child `<input>` first (or insert it via JavaScript to bypass the HTML parser in older browsers).
+  3. Place the child `<input>` last so older browsers retain all `<option>`s inside `<select>`. *(Note: it is still an open question whether we should allow or recommend putting `<input>` last, since Customizable Select requires `<button>` to be the first child and diverging from that ordering could be inconsistent.)*
+
+## Previously Considered Options
+
+Before converging on the combined `<select filterable>` approach above, three separate architectural syntaxes were explored, each of which had significant drawbacks on its own:
 
 ### Option A: Sibling input and listbox/dropdown select using `filter` attribute
 
@@ -68,11 +130,11 @@ In the sibling approach the `<input>` references the `<select>` element via a `f
 
 ```html
 <!-- Listbox filterable select -->
-<input filter=label-select placeholder="Filter labels...">
+<input filter=label-select placeholder="Filter options...">
 <select id=label-select size=4 style="appearance:base-select">
-  <option value="bug">Bug</option>
-  <option value="enhancement">Enhancement</option>
-  <option value="documentation">Documentation</option>
+  <option>one</option>
+  <option>two</option>
+  <option>three</option>
 </select>
 ```
 
@@ -83,11 +145,11 @@ For dropdown popover `<select>` controls, authors combine Customizable Select po
   <selectedcontent for=label-select></selectedcontent>
 </button>
 <dialog popover id=picker>
-  <input filter=label-select placeholder="Search options...">
+  <input filter=label-select placeholder="Filter options...">
   <select size=4 id=label-select>
-    <option value="bug">Bug</option>
-    <option value="enhancement">Enhancement</option>
-    <option value="documentation">Documentation</option>
+    <option>one</option>
+    <option>two</option>
+    <option>three</option>
   </select>
 </dialog>
 ```
@@ -98,19 +160,19 @@ For dropdown popover `<select>` controls, authors combine Customizable Select po
 - **Flexible composition**: Easily accommodates complex picker dialog layouts with auxiliary controls (such as an "Edit labels" button or custom category headers).
 
 **Cons:**
-- **Authoring overhead**: Requires explicit idref linking between elements.
-- **Dropdown markup verbosity**: Constructing custom dropdown select popovers requires additional HTML (`<dialog popover>`, `<button>`, `<selectedcontent>`).
+- **Too much markup for dropdown selects**: Constructing a dropdown filterable select requires wiring up `<button>`, `<selectedcontent>`, `<dialog popover>`, `<input>`, and `<select size=4>` with explicit idrefs. At that point, the platform is requiring so much boilerplate that we are basically not solving dropdown filterable selects for authors anymore.
 - **Missing popover closing behavior**: Selecting an option in a single select does not automatically dismiss the author-defined dialog popover without explicit commands or script. We could try to add fixes to make this work better, but the explicit linking between the picker and the listbox select element is missing.
 
 ### Option B: Nested input inside select
 
-Alternatively, placing an `<input>` element directly inside `<select>` establishes an implicit structural connection. The HTML parser changes and lack of graceful degredation are **major issues** with this option.
+Alternatively, placing an `<input>` element directly inside `<select>` (without a `filterable` attribute on `<select>`) establishes an implicit structural connection. The HTML parser changes and lack of graceful degradation are **major issues** with this option on its own.
 
 ```html
 <select>
-  <input type="text" placeholder="Filter options...">
-  <option value="one">Option One</option>
-  <option value="two">Option Two</option>
+  <input placeholder="Filter options...">
+  <option>one</option>
+  <option>two</option>
+  <option>three</option>
 </select>
 ```
 
@@ -119,20 +181,19 @@ Alternatively, placing an `<input>` element directly inside `<select>` establish
 - **Direct element access**: Authors retain direct access to the `<input>` element.
 
 **Cons:**
-- **HTML parser modifications**: Requires changes to HTML parsing rules to allow `<input>` inside `<select>`, which poses site compatibility risks where legacy markup relies on `<input>` implicitly closing `<select>`.
-- **No graceful degredation**: Even if we did change the HTML parser in a way which hopefully won't break existing websites by allowing `<input>` inside `<select>` if it comes before the `<option>`s, non-supporting and older browsers would render a completely broken control because all of the `<option>`s would be dumped out after the end of the select element. [More details here](https://github.com/whatwg/html/issues/12050#issuecomment-4444940334).
+- **Incompatible trade-off between web compat and progressive enhancement**: Because legacy websites rely on `<input>` implicitly closing `<select>`, changing the parser to allow `<input>` anywhere inside `<select>` would break [too many websites](https://chromestatus.com/metrics/feature/timeline/popularity/5546). Restricting the parser change to only allow `<input>` before `<option>`s avoids breaking those sites, but prevents authors from placing `<input>` after `<option>`s for progressive enhancement—meaning older browsers will dump all `<option>`s outside `<select>` and render a completely broken control ([more details](https://github.com/whatwg/html/issues/12050#issuecomment-4444940334)).
 - **Harder to polyfill**: HTML parser changes make this pattern difficult or impossible to polyfill.
 - **Input in scrollable area**: Without additional changes, the input element will be included in the scroller for the listbox of options, which is not desired. This could be addressed by adding a new element-backed pseudo-element for the listbox: [Issue #1441](https://github.com/openui/open-ui/issues/1441).
 
 ### Option C: HTML attribute on `<select>` (e.g. `<select filterable>`)
 
-A third approach adds a dedicated attribute directly to `<select>` (such as `filterable` or `filter`), causing the browser to automatically create and manage a filter text input within the select's picker popup:
+A third approach adds a dedicated attribute directly to `<select>` (such as `filterable` or `filter`), causing the browser to automatically create and manage a filter text input within the select's picker popup without allowing a slotted child `<input>`:
 
 ```html
 <select filterable>
-  <option value="bug">Bug</option>
-  <option value="enhancement">Enhancement</option>
-  <option value="documentation">Documentation</option>
+  <option>one</option>
+  <option>two</option>
+  <option>three</option>
 </select>
 ```
 
@@ -141,9 +202,8 @@ A third approach adds a dedicated attribute directly to `<select>` (such as `fil
 - **No parser changes**: Avoids HTML parser modifications required for nesting.
 
 **Cons:**
-- **No direct access to input element**: Authors lack direct DOM/JavaScript access to the generated `<input>` element in order to modify attributes or listen to events.
-- **Requires new IDL APIs**: Exposing basic attributes and event handling for the generated input element requires adding multiple new IDLs to HTMLSelectElement.
-  - It may also be useful to expose HTML attributes directly on the select element as new HTML attributes in order to declaratively set the placeholder attribute on the generated input element.
+- **No direct access to input element**: On its own (without the ability to slot a child `<input>`), authors lack direct DOM/JavaScript access to the generated `<input>` element in order to modify attributes or listen to events.
+- **Requires forwarding `<input>` APIs to `<select>`**: To support everything authors might want to configure or observe on the filter input, we would have to forward `<input>` properties/methods onto `HTMLSelectElement`'s IDL and/or add new HTML attributes or sub-elements to `<select>` for configuring the filtering input.
 - **Input in scrollable area**: Without additional changes, the input element will be included in the scroller for the listbox of options, which is not desired. This could be addressed by adding a new element-backed pseudo-element for the listbox: [Issue #1441](https://github.com/openui/open-ui/issues/1441).
 
 ## Interaction and Focus Model
